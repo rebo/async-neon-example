@@ -16,9 +16,12 @@ struct DispatcherTask{
     // mpsc channel receiver needed to fetch data from Node.js runtime
     signal_receiver : Receiver<bool>,
 
+    // A Sender channel to send async data back from NodeJs to the MainBackgroundTask
     new_data_sender: Sender<String>,
     
-    // boxed handle to the callback function that retrieves data from Node.js runtime
+    // boxed handle to the callback function scheduled on the dispatch task
+    // Right now this is a stub blank handle as all work is done in the Dispatch::complete function
+    // In theory this could be a boxed closure so that it could contain more context
     callback_handle: PersistentHandle,
 
     // the Node.js object that contains the function to retrieve Node.js data
