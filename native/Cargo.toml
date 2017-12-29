@@ -1,5 +1,5 @@
 [package]
-name = "persistent"
+name = "Neon-async-example"
 version = "0.1.0"
 authors = ["rebo"]
 license = "MIT"
