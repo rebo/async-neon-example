@@ -1,0 +1,14 @@
+{
+  "name": "Neon-async-example",
+  "version": "0.1.0",
+  "description": "Async Node.js callbacks from Rust in Neon",
+  "main": "lib/index.js",
+  "author": "rebo",
+  "license": "MIT",
+  "dependencies": {
+    "neon-cli": "^0.1.22"
+  },
+  "scripts": {
+    "install": "neon build"
+  }
+}

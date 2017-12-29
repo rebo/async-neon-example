@@ -1,0 +1,17 @@
+[package]
+name = "persistent"
+version = "0.1.0"
+authors = ["rebo"]
+license = "MIT"
+build = "build.rs"
+
+[lib]
+name = "persistent"
+crate-type = ["dylib"]
+
+[build-dependencies]
+neon-build = { path = "/Users/rebo/Coding/src/rebo-neon/crates/neon-build" }
+neon-runtime = { path = "/Users/rebo/Coding/src/rebo-neon/crates/neon-runtime" }
+
+[dependencies]
+neon = {path="/Users/rebo/Coding/src/rebo-neon/"}
