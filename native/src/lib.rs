@@ -165,10 +165,10 @@ pub fn perform_async_task(call: Call) -> JsResult<JsUndefined> {
     let dispatch = DispatcherTask::new(callback_handle, dispatch_signal_receiver);
     dispatch.schedule(callback);
 
-    (MasterBackgroundTask {
+    MasterBackgroundTask {
         dispatch_task_sender: dispatch_signal_sender,
         new_data_receiver: new_data_receiver,
-    }).schedule(main_task_callback);
+    }.schedule(main_task_callback);
 
     Ok(JsUndefined::new())
 }
