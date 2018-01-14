@@ -1,5 +1,6 @@
 #[macro_use]
 extern crate neon;
+mod dispatch;
 
 use neon::vm::{Call, JsResult};
 use neon::js::{JsBoolean, JsFunction, JsObject, JsString, JsUndefined, JsValue, Object};
@@ -12,85 +13,7 @@ use std::sync::mpsc::{Receiver, Sender};
 
 use std::time;
 
-use std::error::Error;
-use std::fmt;
-
-struct DispatcherTask {
-    // mpsc channel receiver needed to fetch data from Node.js runtime
-    signal_receiver: Receiver<DispatchCommand>,
-
-    // A Sender channel to send async data back from NodeJs to the MainBackgroundTask
-    callback_handle: PersistentHandle,
-}
-
-#[derive(Debug)]
-struct DispatchError {}
-
-impl fmt::Display for DispatchError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Dispatch Error!")
-    }
-}
-
-impl Error for DispatchError {
-    fn description(&self) -> &str {
-        "This is an error with the Dispatch Task"
-    }
-
-    fn cause(&self) -> Option<&Error> {
-        None
-    }
-}
-
-enum DispatchCommand {
-    Continue,
-    Cancel,
-}
-
-impl Task for DispatcherTask {
-    type Output = DispatchCommand;
-    type Error = DispatchError;
-
-    // A JsBoolean to control whether the callback is fully executed.
-    type JsEvent = JsBoolean;
-
-    // This perform method should be running continually and enables communication with node.js
-    fn perform(&self) -> Result<Self::Output, Self::Error> {
-        // Don't do anything until signalled
-        match self.signal_receiver.recv() {
-            Ok(DispatchCommand::Continue) => Ok(DispatchCommand::Continue),
-            Ok(DispatchCommand::Cancel) => Ok(DispatchCommand::Cancel),
-            Err(_) => Err(DispatchError {}),
-        }
-    }
-
-    // Either reschedule the command or not.
-    fn complete<'a, T: Scope<'a>>(
-        self,
-        scope: &'a mut T,
-        result: Result<Self::Output, Self::Error>,
-    ) -> JsResult<Self::JsEvent> {
-        match result {
-            // If DispatchCommand::Coninue then reschedule the callback
-            Ok(DispatchCommand::Continue) => {
-                let callback: Handle<JsFunction> =
-                    self.callback_handle.clone().into_handle(scope).check()?;
-                self.schedule(callback);
-
-                Ok(JsBoolean::new(scope, true))
-            }
-
-            // If DispatchCommand::Cancel then do not reschedule the callback
-            Ok(DispatchCommand::Cancel) => {
-                println!("DispatchTask has been Cancelled");
-                Ok(JsBoolean::new(scope, false))
-            }
-
-            // Return false if you do not want the callback to fire
-            Err(_) => Ok(JsBoolean::new(scope, false)),
-        }
-    }
-}
+use dispatch::{DispatchCommand, DispatcherTask};
 
 struct MasterBackgroundTask {
     // Needs a mpsc channel Sender in order to message the dispatch task so it can trigger completion.
@@ -106,8 +29,7 @@ impl Task for MasterBackgroundTask {
     // the return type of perform (within a result)
     type Output = MasterBackgroundResult;
 
-    // the error type of perform (within a result)
-    // this should never be needed
+    // the error type of perform (within a result) this should never be needed
     type Error = MasterBackgroundResult;
 
     // the return type of the callback, counts the number of messages received from Node.js
@@ -126,7 +48,8 @@ impl Task for MasterBackgroundTask {
                 // trigger the dispatch to complete, then re-schedule itself
                 self.dispatch_task_sender
                     .send(DispatchCommand::Continue)
-                    .unwrap();
+                    .expect("Error: I expect to be able to send to the dispatch task!");
+
                 // Receive new data from the dispatch task (obtained from Node.js)
                 let new_data_from_nodejs = self.new_data_receiver
                     .recv()
@@ -135,6 +58,7 @@ impl Task for MasterBackgroundTask {
                 let elapsed = starttime.elapsed();
                 let seconds = elapsed.as_secs();
                 let millisecs = elapsed.subsec_nanos() / 1_000_000;
+
                 println!(
                     "new data recieved asyncrously: {:?} at {:?} secs {:?} ms",
                     new_data_from_nodejs, seconds, millisecs
@@ -177,14 +101,21 @@ pub fn perform_async_task(call: Call) -> JsResult<JsUndefined> {
         Sender<DispatchCommand>,
         Receiver<DispatchCommand>,
     ) = mpsc::channel();
+
     let (new_data_sender, new_data_receiver): (Sender<String>, Receiver<String>) = mpsc::channel();
 
     // This callback fires when the dispatcher is completed just returns a new JsObject
     let callback = JsFunction::new(
         scope,
         Box::new(move |inner| {
+            // Callback function for the DispatcherTask
+
+            // The object returned is irrelevant, it is not used by node.js
+
             // check to see if we should return early and not continue
             // this should be general to any DispatchTask callbbck
+            // this is important because we dont want to send a message back to the main task
+            // if the main task has completed.
             let cont = inner
                 .arguments
                 .require(inner.scope, 1)?
@@ -192,13 +123,13 @@ pub fn perform_async_task(call: Call) -> JsResult<JsUndefined> {
                 .value();
 
             if !cont {
-                return Ok(JsObject::new(inner.scope));
+                return Ok(JsUndefined::new());
             }
 
             // The below code is fired on on the main thread by the node.js runtime
-            // It should be specific to what data you want from the Nodejs runtime
+            // It should be specific to the infomration data we want from the Nodejs runtime
 
-            // btw we need to clone handles because otherwise rust beleives they can be
+            // btw we need to clone handles because otherwise Rust beleives they can be
             // referenced multiple times from a FnMut
 
             let msg_buffer: Handle<JsObject> = message_buffer_handle
@@ -222,20 +153,16 @@ pub fn perform_async_task(call: Call) -> JsResult<JsUndefined> {
                 .send(new_messages)
                 .expect("Error: I expect to be able to send new data!");
 
-            Ok(JsObject::new(inner.scope))
+            Ok(JsUndefined::new())
         }),
     )?;
 
-    // persistent handles, js referenced objects need to be 'boxed' like this
+    // Persistent handles, js referenced objects need to be 'boxed' like this
     // with type erasure so that they can be sent accross threads (stored in the DispatchTask)
     let callback_handle = PersistentHandle::new(callback);
 
-    // dispatch task object
-    let dispatch = DispatcherTask {
-        callback_handle: callback_handle,
-        signal_receiver: dispatch_signal_receiver,
-    };
-
+    // Dispatch task object
+    let dispatch = DispatcherTask::new(callback_handle, dispatch_signal_receiver);
     dispatch.schedule(callback);
 
     (MasterBackgroundTask {
