@@ -4,6 +4,7 @@ mod dispatch;
 
 use neon::vm::{Call, JsResult};
 use neon::js::{JsBoolean, JsFunction, JsObject, JsString, JsUndefined, JsValue, Object};
+
 use neon::mem::{Handle, PersistentHandle};
 use neon::scope::Scope;
 use neon::task::Task;
@@ -35,7 +36,7 @@ impl Task for MasterBackgroundTask {
     // the return type of the callback, counts the number of messages received from Node.js
     type JsEvent = JsBoolean;
 
-    fn perform(&self) -> Result<Self::Output, Self::Error> {
+    fn perform(&mut self) -> Result<Self::Output, Self::Error> {
         // loop for 20 seconds
         let starttime = time::Instant::now();
         let endtime = starttime + time::Duration::from_secs(2) + time::Duration::from_millis(2);
@@ -131,7 +132,6 @@ pub fn perform_async_task(call: Call) -> JsResult<JsUndefined> {
 
             // btw we need to clone handles because otherwise Rust beleives they can be
             // referenced multiple times from a FnMut
-
             let msg_buffer: Handle<JsObject> = message_buffer_handle
                 .clone()
                 .into_handle(inner.scope)
@@ -162,7 +162,7 @@ pub fn perform_async_task(call: Call) -> JsResult<JsUndefined> {
     let callback_handle = PersistentHandle::new(callback);
 
     // Dispatch task object
-    let dispatch = DispatcherTask::new(callback_handle, dispatch_signal_receiver);
+    let dispatch = DispatcherTask::new(dispatch_signal_receiver, callback_handle);
     dispatch.schedule(callback);
 
     MasterBackgroundTask {

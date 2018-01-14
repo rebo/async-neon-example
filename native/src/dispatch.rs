@@ -21,10 +21,10 @@ pub struct DispatcherTask {
 }
 
 impl DispatcherTask {
-    pub fn new(callback_handle: PersistentHandle, rx: Receiver<DispatchCommand>) -> DispatcherTask {
+    pub fn new(rx: Receiver<DispatchCommand>, callback_handle: PersistentHandle) -> DispatcherTask {
         DispatcherTask {
-            callback_handle: callback_handle,
             signal_receiver: rx,
+            callback_handle: callback_handle,
         }
     }
 }
@@ -61,7 +61,7 @@ impl Task for DispatcherTask {
     type JsEvent = JsBoolean;
 
     // This perform method should be running continually and enables communication with node.js
-    fn perform(&self) -> Result<Self::Output, Self::Error> {
+    fn perform(&mut self) -> Result<Self::Output, Self::Error> {
         // Don't do anything until signalled
         match self.signal_receiver.recv() {
             Ok(DispatchCommand::Continue) => Ok(DispatchCommand::Continue),
